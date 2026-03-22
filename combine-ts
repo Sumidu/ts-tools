@@ -218,6 +218,11 @@ for idx in "${selected_indices[@]}"; do
     size="$(du -sh "$output_file" | cut -f1)"
     success "Saved: ${BOLD}$(basename "$output_file")${RESET}  ${DIM}(${size})${RESET}"
     (( success_count++ )) || true
+    # Remove the source .ts files for this group
+    for f in "${files[@]}"; do
+      rm -f "$f"
+      echo -e "   ${DIM}deleted $(basename "$f")${RESET}"
+    done
   else
     error "Failed to combine group: $prefix"
     rm -f "$output_file"
