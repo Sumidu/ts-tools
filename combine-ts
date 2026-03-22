@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# combine-ts — Merge .ts files in ~/Downloads into MP4s, grouped by prefix
+# Usage: combine-ts [directory]
+# Requires: bash 3.2+ (macOS default), ffmpeg
+
+set -euo pipefail
+
+# ── Colours ────────────────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+RESET='\033[0m'
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+info()    { echo -e "${CYAN}▸${RESET} $*"; }
+success() { echo -e "${GREEN}✔${RESET} $*"; }
+warn()    { echo -e "${YELLOW}⚠${RESET}  $*"; }
+error()   { echo -e "${RED}✖${RESET}  $*" >&2; }
+header()  { echo -e "\n${BOLD}${BLUE}$*${RESET}"; }
+divider() { echo -e "${DIM}─────────────────────────────────────────${RESET}"; }
+
+# ── Dependency check ───────────────────────────────────────────────────────
+if ! command -v ffmpeg &>/dev/null; then
+  error "ffmpeg not found. Install it with: brew install ffmpeg"
+  exit 1
+fi
+
+# ── Target directory ───────────────────────────────────────────────────────
+TARGET_DIR="${1:-$HOME/Downloads}"
+
+if [[ ! -d "$TARGET_DIR" ]]; then
+  error "Directory not found: $TARGET_DIR"
+  exit 1
+fi
+
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+header "🎬  combine-ts"
+divider
+info "Scanning: ${BOLD}$TARGET_DIR${RESET}"
+
+# ── Find all .ts files ─────────────────────────────────────────────────────
+# bash 3.2 compatible: use while-read instead of mapfile
+ALL_TS=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && ALL_TS+=("$line")
+done < <(find "$TARGET_DIR" -maxdepth 1 -name "*.ts" -type f | sort)
+
+if [[ ${#ALL_TS[@]} -eq 0 ]]; then
+  warn "No .ts files found in $TARGET_DIR"
+  exit 0
+fi
+
+info "Found ${BOLD}${#ALL_TS[@]}${RESET} .ts file(s)"
+
+# ── Extract prefix from filename ───────────────────────────────────────────
+# Strips trailing sequence number once: _001, -02, .3, 4
+# Preserves episode codes like S01E02.
+get_prefix() {
+  local name
+  name="$(basename "$1" .ts)"
+  echo "$name" | sed -E 's/[._-]?[0-9]+$//'
+}
+
+# ── Sanitize a prefix for use as a filename ────────────────────────────────
+sanitize() {
+  echo "$1" | tr '/:*?"<>|\\' '_'
+}
+
+# ── Group files by prefix using a temp directory ───────────────────────────
+# Each group gets a file: line 1 = raw prefix, rest = filepaths
+WORK_DIR="$(mktemp -d /tmp/combine-ts-XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+PREFIX_ORDER=()
+
+for f in "${ALL_TS[@]}"; do
+  prefix="$(get_prefix "$f")"
+  key="$(sanitize "$prefix")"
+  group_file="$WORK_DIR/group_${key}"
+  if [[ ! -f "$group_file" ]]; then
+    PREFIX_ORDER+=("$prefix")
+    echo "$prefix" > "$group_file"
+  fi
+  echo "$f" >> "$group_file"
+done
+
+# ── Display found groups ───────────────────────────────────────────────────
+header "📂  Detected Groups"
+divider
+
+IDX_PREFIX=()
+IDX_KEY=()
+
+i=0
+for prefix in "${PREFIX_ORDER[@]}"; do
+  key="$(sanitize "$prefix")"
+  group_file="$WORK_DIR/group_${key}"
+  IDX_PREFIX+=("$prefix")
+  IDX_KEY+=("$key")
+
+  echo -e "  ${BOLD}[$((i+1))]${RESET} ${CYAN}${prefix}${RESET}  →  ${DIM}${prefix}.mp4${RESET}"
+  tail -n +2 "$group_file" | while IFS= read -r file; do
+    echo -e "      ${DIM}$(basename "$file")${RESET}"
+  done
+
+  (( i++ )) || true
+done
+
+divider
+
+# ── Ask which groups to process ────────────────────────────────────────────
+total_groups="${#PREFIX_ORDER[@]}"
+
+echo -e "\nWhich groups to combine?"
+echo -e "  ${BOLD}a${RESET}  All groups"
+echo -e "  ${BOLD}1-$total_groups${RESET}  Specific group(s), comma-separated (e.g. 1,3)"
+echo -e "  ${BOLD}q${RESET}  Quit"
+echo
+printf "Your choice: "
+read -r choice
+
+if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+  info "Bye!"
+  exit 0
+fi
+
+# Build list of selected 0-based indices
+selected_indices=()
+if [[ "$choice" == "a" || "$choice" == "A" ]]; then
+  for (( j=0; j<${#IDX_PREFIX[@]}; j++ )); do
+    selected_indices+=("$j")
+  done
+else
+  IFS=',' read -ra nums <<< "$choice"
+  for n in "${nums[@]}"; do
+    n="${n// /}"
+    idx=$(( n - 1 ))
+    if (( idx >= 0 && idx < ${#IDX_PREFIX[@]} )); then
+      selected_indices+=("$idx")
+    else
+      warn "Unknown group number: $n (skipping)"
+    fi
+  done
+fi
+
+if [[ ${#selected_indices[@]} -eq 0 ]]; then
+  error "No valid groups selected."
+  exit 1
+fi
+
+# ── Ask for output directory ───────────────────────────────────────────────
+echo
+printf "Output directory [%s]: " "$TARGET_DIR"
+read -r out_dir
+out_dir="${out_dir:-$TARGET_DIR}"
+out_dir="${out_dir/#\~/$HOME}"
+
+if [[ ! -d "$out_dir" ]]; then
+  printf "Directory does not exist. Create it? [y/N] "
+  read -r create_dir
+  if [[ "$create_dir" == "y" || "$create_dir" == "Y" ]]; then
+    mkdir -p "$out_dir"
+    success "Created: $out_dir"
+  else
+    error "Output directory not available. Aborting."
+    exit 1
+  fi
+fi
+
+# ── Process each selected group ────────────────────────────────────────────
+header "⚙️   Combining"
+divider
+
+success_count=0
+fail_count=0
+
+for idx in "${selected_indices[@]}"; do
+  prefix="${IDX_PREFIX[$idx]}"
+  key="${IDX_KEY[$idx]}"
+  group_file="$WORK_DIR/group_${key}"
+  output_file="${out_dir}/${prefix}.mp4"
+
+  # Collect files (skip line 1 = prefix label), sorted
+  files=()
+  while IFS= read -r file; do
+    [[ -n "$file" ]] && files+=("$file")
+  done < <(tail -n +2 "$group_file" | sort)
+
+  echo -e "\n${BOLD}▶  ${prefix}${RESET}  (${#files[@]} file(s) → $(basename "$output_file"))"
+
+  if [[ -f "$output_file" ]]; then
+    warn "Output already exists: $(basename "$output_file") — skipping. Delete it to re-encode."
+    continue
+  fi
+
+  concat_list="$(mktemp /tmp/combine-ts-concat-XXXXXX.txt)"
+
+  for f in "${files[@]}"; do
+    printf "file '%s'\n" "$f" >> "$concat_list"
+    echo -e "   ${DIM}+ $(basename "$f")${RESET}"
+  done
+
+  echo
+  if ffmpeg \
+      -f concat \
+      -safe 0 \
+      -i "$concat_list" \
+      -c copy \
+      -movflags +faststart \
+      -y \
+      "$output_file" \
+      2>/dev/null; then
+    size="$(du -sh "$output_file" | cut -f1)"
+    success "Saved: ${BOLD}$(basename "$output_file")${RESET}  ${DIM}(${size})${RESET}"
+    (( success_count++ )) || true
+  else
+    error "Failed to combine group: $prefix"
+    rm -f "$output_file"
+    (( fail_count++ )) || true
+  fi
+
+  rm -f "$concat_list"
+done
+
+# ── Summary ────────────────────────────────────────────────────────────────
+header "📋  Done"
+divider
+[[ $success_count -gt 0 ]] && success "$success_count group(s) combined successfully"
+[[ $fail_count -gt 0 ]]    && error   "$fail_count group(s) failed"
+echo
