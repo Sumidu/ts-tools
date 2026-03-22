@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # download-ts — Download a numbered sequence of .ts files
-# Usage: download-ts <url-of-first-file> [output-directory]
+# Usage: download-ts [--auto] <url-of-first-file> [output-directory]
 
 set -euo pipefail
 
@@ -26,6 +26,18 @@ if ! command -v curl &>/dev/null; then
   error "curl not found."
   exit 1
 fi
+
+# ── Parse flags ───────────────────────────────────────────────────────────
+AUTO=0
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == "--auto" ]]; then
+    AUTO=1
+  else
+    args+=("$arg")
+  fi
+done
+set -- "${args[@]+"${args[@]}"}"
 
 # ── Get URL (argument or interactive prompt) ──────────────────────────────
 if [[ $# -ge 1 ]]; then
@@ -88,10 +100,14 @@ info "Base URL   : ${BOLD}$base_url${RESET}"
 info "Name prefix: ${BOLD}${name_prefix}${RESET}  number width: ${BOLD}${pad_width}${RESET}"
 
 # ── Ask for last file number (or auto-detect) ─────────────────────────────
-echo
-printf "Last file number [Enter to auto-detect]: "
-read -r last_input
-last_input="${last_input// /}"
+if [[ $AUTO -eq 1 ]]; then
+  last_input=""
+else
+  echo
+  printf "Last file number [Enter to auto-detect]: "
+  read -r last_input
+  last_input="${last_input// /}"
+fi
 
 if [[ -z "$last_input" ]]; then
   # Auto-detect: probe files via HEAD requests until server returns an error
@@ -135,21 +151,26 @@ fi
 total=$(( last_n - first_n + 1 ))
 
 # ── Confirm output directory ───────────────────────────────────────────────
-echo
-printf "Output directory [%s]: " "$OUTPUT_DIR"
-read -r chosen_dir
-chosen_dir="${chosen_dir:-$OUTPUT_DIR}"
-chosen_dir="${chosen_dir/#\~/$HOME}"
+if [[ $AUTO -eq 1 ]]; then
+  chosen_dir="$OUTPUT_DIR"
+  mkdir -p "$chosen_dir"
+else
+  echo
+  printf "Output directory [%s]: " "$OUTPUT_DIR"
+  read -r chosen_dir
+  chosen_dir="${chosen_dir:-$OUTPUT_DIR}"
+  chosen_dir="${chosen_dir/#\~/$HOME}"
 
-if [[ ! -d "$chosen_dir" ]]; then
-  printf "Directory does not exist. Create it? [y/N] "
-  read -r make_dir
-  if [[ "$make_dir" == "y" || "$make_dir" == "Y" ]]; then
-    mkdir -p "$chosen_dir"
-    success "Created: $chosen_dir"
-  else
-    error "Output directory unavailable. Aborting."
-    exit 1
+  if [[ ! -d "$chosen_dir" ]]; then
+    printf "Directory does not exist. Create it? [y/N] "
+    read -r make_dir
+    if [[ "$make_dir" == "y" || "$make_dir" == "Y" ]]; then
+      mkdir -p "$chosen_dir"
+      success "Created: $chosen_dir"
+    else
+      error "Output directory unavailable. Aborting."
+      exit 1
+    fi
   fi
 fi
 
@@ -160,11 +181,13 @@ info "Files to download : ${BOLD}$total${RESET}"
 info "Range             : ${BOLD}$(printf "%0${pad_width}d" $first_n)${RESET} → ${BOLD}$(printf "%0${pad_width}d" $last_n)${RESET}"
 info "Saving to         : ${BOLD}$chosen_dir${RESET}"
 echo
-printf "Start download? [Y/n] "
-read -r confirm
-if [[ "$confirm" == "n" || "$confirm" == "N" ]]; then
-  info "Aborted."
-  exit 0
+if [[ $AUTO -eq 0 ]]; then
+  printf "Start download? [Y/n] "
+  read -r confirm
+  if [[ "$confirm" == "n" || "$confirm" == "N" ]]; then
+    info "Aborted."
+    exit 0
+  fi
 fi
 
 # ── Download loop ──────────────────────────────────────────────────────────

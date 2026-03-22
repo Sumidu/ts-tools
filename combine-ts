@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # combine-ts — Merge .ts files in ~/Downloads into MP4s, grouped by prefix
-# Usage: combine-ts [directory]
+# Usage: combine-ts [--auto] [directory]
 # Requires: bash 3.2+ (macOS default), ffmpeg
 
 set -euo pipefail
@@ -28,6 +28,18 @@ if ! command -v ffmpeg &>/dev/null; then
   error "ffmpeg not found. Install it with: brew install ffmpeg"
   exit 1
 fi
+
+# ── Parse flags ───────────────────────────────────────────────────────────
+AUTO=0
+args=()
+for arg in "$@"; do
+  if [[ "$arg" == "--auto" ]]; then
+    AUTO=1
+  else
+    args+=("$arg")
+  fi
+done
+set -- "${args[@]+"${args[@]}"}"
 
 # ── Target directory ───────────────────────────────────────────────────────
 TARGET_DIR="${1:-$HOME/Downloads}"
@@ -116,36 +128,42 @@ divider
 # ── Ask which groups to process ────────────────────────────────────────────
 total_groups="${#PREFIX_ORDER[@]}"
 
-echo -e "\nWhich groups to combine?"
-echo -e "  ${BOLD}a${RESET}  All groups"
-echo -e "  ${BOLD}1-$total_groups${RESET}  Specific group(s), comma-separated (e.g. 1,3)"
-echo -e "  ${BOLD}q${RESET}  Quit"
-echo
-printf "Your choice: "
-read -r choice
-
-if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
-  info "Bye!"
-  exit 0
-fi
-
-# Build list of selected 0-based indices
 selected_indices=()
-if [[ "$choice" == "a" || "$choice" == "A" ]]; then
+if [[ $AUTO -eq 1 ]]; then
+  # Auto mode: select all groups without prompting
   for (( j=0; j<${#IDX_PREFIX[@]}; j++ )); do
     selected_indices+=("$j")
   done
 else
-  IFS=',' read -ra nums <<< "$choice"
-  for n in "${nums[@]}"; do
-    n="${n// /}"
-    idx=$(( n - 1 ))
-    if (( idx >= 0 && idx < ${#IDX_PREFIX[@]} )); then
-      selected_indices+=("$idx")
-    else
-      warn "Unknown group number: $n (skipping)"
-    fi
-  done
+  echo -e "\nWhich groups to combine?"
+  echo -e "  ${BOLD}a${RESET}  All groups"
+  echo -e "  ${BOLD}1-$total_groups${RESET}  Specific group(s), comma-separated (e.g. 1,3)"
+  echo -e "  ${BOLD}q${RESET}  Quit"
+  echo
+  printf "Your choice: "
+  read -r choice
+
+  if [[ "$choice" == "q" || "$choice" == "Q" ]]; then
+    info "Bye!"
+    exit 0
+  fi
+
+  if [[ "$choice" == "a" || "$choice" == "A" ]]; then
+    for (( j=0; j<${#IDX_PREFIX[@]}; j++ )); do
+      selected_indices+=("$j")
+    done
+  else
+    IFS=',' read -ra nums <<< "$choice"
+    for n in "${nums[@]}"; do
+      n="${n// /}"
+      idx=$(( n - 1 ))
+      if (( idx >= 0 && idx < ${#IDX_PREFIX[@]} )); then
+        selected_indices+=("$idx")
+      else
+        warn "Unknown group number: $n (skipping)"
+      fi
+    done
+  fi
 fi
 
 if [[ ${#selected_indices[@]} -eq 0 ]]; then
@@ -154,21 +172,25 @@ if [[ ${#selected_indices[@]} -eq 0 ]]; then
 fi
 
 # ── Ask for output directory ───────────────────────────────────────────────
-echo
-printf "Output directory [%s]: " "$TARGET_DIR"
-read -r out_dir
-out_dir="${out_dir:-$TARGET_DIR}"
-out_dir="${out_dir/#\~/$HOME}"
+if [[ $AUTO -eq 1 ]]; then
+  out_dir="$TARGET_DIR"
+else
+  echo
+  printf "Output directory [%s]: " "$TARGET_DIR"
+  read -r out_dir
+  out_dir="${out_dir:-$TARGET_DIR}"
+  out_dir="${out_dir/#\~/$HOME}"
 
-if [[ ! -d "$out_dir" ]]; then
-  printf "Directory does not exist. Create it? [y/N] "
-  read -r create_dir
-  if [[ "$create_dir" == "y" || "$create_dir" == "Y" ]]; then
-    mkdir -p "$out_dir"
-    success "Created: $out_dir"
-  else
-    error "Output directory not available. Aborting."
-    exit 1
+  if [[ ! -d "$out_dir" ]]; then
+    printf "Directory does not exist. Create it? [y/N] "
+    read -r create_dir
+    if [[ "$create_dir" == "y" || "$create_dir" == "Y" ]]; then
+      mkdir -p "$out_dir"
+      success "Created: $out_dir"
+    else
+      error "Output directory not available. Aborting."
+      exit 1
+    fi
   fi
 fi
 

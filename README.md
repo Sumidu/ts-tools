@@ -6,6 +6,7 @@ Two small macOS CLI tools for downloading and merging `.ts` video segment files.
 |---|---|
 | `download-ts` | Downloads a numbered sequence of `.ts` files from a URL |
 | `combine-ts` | Merges `.ts` files into a single `.mp4`, grouped by filename prefix |
+| `download-combine-ts` | Does both in one step — just provide the URL |
 
 ---
 
@@ -29,17 +30,18 @@ Download both scripts and place them somewhere on your `$PATH`:
 
 ```bash
 # Move scripts to /usr/local/bin (or any directory on your PATH)
-mv download-ts combine-ts /usr/local/bin/
+mv download-ts combine-ts download-combine-ts /usr/local/bin/
 
 # Make them executable
-chmod +x /usr/local/bin/download-ts /usr/local/bin/combine-ts
+chmod +x /usr/local/bin/download-ts /usr/local/bin/combine-ts /usr/local/bin/download-combine-ts
 ```
 
 Verify the installation:
 
 ```bash
-download-ts --help   # shows usage hint
-combine-ts           # starts interactive mode
+download-ts --help        # shows usage hint
+combine-ts                # starts interactive mode
+download-combine-ts       # starts the one-step workflow
 ```
 
 ---
@@ -119,6 +121,7 @@ After confirming the plan, files are downloaded one by one:
 - Files that already exist in the output directory are skipped — safe to re-run after interruption
 - Downloads retry up to 3 times on failure
 - Supports URLs with any zero-padded numeric suffix: `segment003.ts`, `show_S01E02_001.ts`, `042.ts`, etc.
+- Pass `--auto` to skip all prompts (auto-detect file count, use `~/Downloads`, skip confirmation) — used internally by `download-combine-ts`
 
 ---
 
@@ -199,17 +202,85 @@ The tool strips the trailing sequence number from each filename to determine the
 - Output files get `-movflags +faststart` for web-friendly MP4s
 - If an output file already exists it is skipped — delete it to re-merge
 - Files within each group are sorted alphabetically before merging
+- Source `.ts` files are deleted after a successful merge
+- Pass `--auto` to skip all prompts (select all groups, use the scanned directory as output) — used internally by `download-combine-ts`
+
+---
+
+## `download-combine-ts`
+
+Downloads a `.ts` sequence and merges it into an `.mp4` in one fully automated step.
+All files are saved to `~/Downloads` and the source `.ts` files are removed after a successful merge.
+
+### Usage
+
+```
+download-combine-ts [url-of-first-ts-file]
+```
+
+### Examples
+
+```bash
+# Pass the URL directly
+download-combine-ts https://cdn.example.com/show/episode_001.ts
+
+# Run interactively (will prompt for URL)
+download-combine-ts
+```
+
+### Flow
+
+```
+🎬  download-combine-ts
+─────────────────────────────────────────
+▸ Saving to : /Users/you/Downloads
+▸ Mode      : auto-detect files → download → combine → clean up
+
+Step 1 / 2 — Download
+─────────────────────────────────────────
+▸ Auto-detecting last file...
+  Probing episode_001.ts ... ✔  (200)
+  Probing episode_002.ts ... ✔  (200)
+  Probing episode_003.ts ... ✖  (404) — stopped
+✔ Detected last file: 002  (2 file(s))
+⬇  [1/2] episode_001.ts ...  ✔  12M
+⬇  [2/2] episode_002.ts ...  ✔  11M
+
+Step 2 / 2 — Combine
+─────────────────────────────────────────
+▶  episode  (2 file(s) → episode.mp4)
+✔ Saved: episode.mp4  (23M)
+   deleted episode_001.ts
+   deleted episode_002.ts
+
+✅  All done
+─────────────────────────────────────────
+✔ MP4 file(s) saved in /Users/you/Downloads
+```
+
+### Notes
+
+- `download-combine-ts` looks for `download-ts` and `combine-ts` next to itself first, then falls back to `PATH`
+- All three scripts must be installed for this to work
 
 ---
 
 ## Typical workflow
 
+**One step** — download and merge automatically:
+
+```bash
+download-combine-ts https://cdn.example.com/video/episode_001.ts
+```
+
+**Two steps** — with manual control over file count and output directory:
+
 ```bash
 # 1. Download the segments
-download-ts https://cdn.example.com/video/episode_001.ts ~/Downloads
+download-ts https://cdn.example.com/video/episode_001.ts ~/Movies
 
 # 2. Merge them into an MP4
-combine-ts ~/Downloads
+combine-ts ~/Movies
 ```
 
 ---

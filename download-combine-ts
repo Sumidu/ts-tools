@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# download-combine-ts — Download a .ts sequence and merge it into an MP4 in one step
+# Usage: download-combine-ts [url-of-first-ts-file]
+
+set -euo pipefail
+
+# ── Colours ────────────────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+BLUE='\033[0;34m'
+RESET='\033[0m'
+
+info()    { echo -e "${CYAN}▸${RESET} $*"; }
+success() { echo -e "${GREEN}✔${RESET} $*"; }
+error()   { echo -e "${RED}✖${RESET}  $*" >&2; }
+header()  { echo -e "\n${BOLD}${BLUE}$*${RESET}"; }
+divider() { echo -e "${DIM}─────────────────────────────────────────${RESET}"; }
+
+# ── Locate sibling scripts ─────────────────────────────────────────────────
+# Look next to this script first, then fall back to PATH
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+find_tool() {
+  local name="$1"
+  if [[ -x "$SCRIPT_DIR/$name" ]]; then
+    echo "$SCRIPT_DIR/$name"
+  elif command -v "$name" &>/dev/null; then
+    echo "$name"
+  else
+    error "'$name' not found. Make sure it is installed alongside this script or on your PATH."
+    exit 1
+  fi
+}
+
+DOWNLOAD_TS="$(find_tool download-ts)"
+COMBINE_TS="$(find_tool combine-ts)"
+
+# ── Get URL ────────────────────────────────────────────────────────────────
+header "🎬  download-combine-ts"
+divider
+
+if [[ $# -ge 1 ]]; then
+  FIRST_URL="$1"
+else
+  printf "URL of first .ts file: "
+  read -r FIRST_URL
+  FIRST_URL="${FIRST_URL// /}"
+  if [[ -z "$FIRST_URL" ]]; then
+    error "No URL provided."
+    exit 1
+  fi
+fi
+
+if [[ ! "$FIRST_URL" =~ ^https?:// ]]; then
+  error "URL must start with http:// or https://"
+  exit 1
+fi
+
+OUTPUT_DIR="$HOME/Downloads"
+
+info "Saving to : ${BOLD}$OUTPUT_DIR${RESET}"
+info "Mode      : ${BOLD}auto-detect files → download → combine → clean up${RESET}"
+
+# ── Step 1: Download ───────────────────────────────────────────────────────
+header "Step 1 / 2 — Download"
+divider
+
+"$DOWNLOAD_TS" --auto "$FIRST_URL" "$OUTPUT_DIR"
+
+# ── Step 2: Combine ────────────────────────────────────────────────────────
+header "Step 2 / 2 — Combine"
+divider
+
+"$COMBINE_TS" --auto "$OUTPUT_DIR"
+
+# ── Done ───────────────────────────────────────────────────────────────────
+header "✅  All done"
+divider
+success "MP4 file(s) saved in ${BOLD}$OUTPUT_DIR${RESET}"
+echo
