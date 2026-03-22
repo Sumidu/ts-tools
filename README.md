@@ -26,7 +26,7 @@ brew install ffmpeg
 
 ## Installation
 
-Download both scripts and place them somewhere on your `$PATH`:
+Download all three scripts and place them somewhere on your `$PATH` (might need sudo):
 
 ```bash
 # Move scripts to /usr/local/bin (or any directory on your PATH)
